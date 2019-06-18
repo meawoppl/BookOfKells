@@ -1,35 +1,43 @@
-import itertools, io, sys, urllib
+import itertools
+import io
+import os
+import sys
+import urllib.request
 import urllib.error
+
 import numpy as np
 from scipy.misc import imread, imsave
 
-baseURL = r"http://digitalcollections.tcd.ie/content/14/pages/MS58_%03i%s/image_files/12/%i_%i.jpg"
+baseURL = r"https://digitalcollections.tcd.ie/content/14/pages/MS58_%03i%s/image_files/12/%i_%i.jpg"
 
 
-def makeURL(pgNum, vr, xC, yC):
+def make_url(pgNum, vr, xC, yC):
     return baseURL % (pgNum, vr, xC, yC)
 
 
-def showOrFail(url):
+def show_or_fail(url):
     from pylab import imshow, title, show
-    imgData = retrieveToImg(url)
-    title(imgData.shape)
-    imshow(imgData)
+    data = image_url_to_array(url)
+    title(data.shape)
+    imshow(data)
     show()
 
-def retrieveToImg(url):
+
+def image_url_to_array(url):
     bio = io.BytesIO(urllib.request.urlopen(url).read())
     return imread(bio)
 
-def getTile(pgNum, vr, xC, yC):
-    u = makeURL(pgNum, vr, xC, yC)
-    return retrieveToImg(u)
 
-def probeDimensions(pgNumber, vr):
+def get_tile(pgNum, vr, xC, yC):
+    u = make_url(pgNum, vr, xC, yC)
+    return image_url_to_array(u)
+
+
+def probe_dimensions(pgNumber, vr):
     x = 0
     while True:
         try:
-            i = getTile(pgNumber, vr, x, 0)
+            i = get_tile(pgNumber, vr, x, 0)
         except urllib.error.HTTPError:
             break
         x += 1
@@ -37,7 +45,7 @@ def probeDimensions(pgNumber, vr):
     y = 0
     while True:
         try:
-            i = getTile(pgNumber, vr, 0, y)
+            i = get_tile(pgNumber, vr, 0, y)
         except urllib.error.HTTPError:
             break
         y += 1
@@ -45,44 +53,52 @@ def probeDimensions(pgNumber, vr):
     return x, y
         
 
-def retrievePage(pgNumber, vr):
+def retrieve_page(pgNumber, vr):
     print("Retrieving page:", pgNumber, vr)
     ystripes = []    
-    print("\tProbing Size ", end="")
+    print("\tProbing Size -> ", end="")
     sys.stdout.flush()
-    xm, ym = probeDimensions(pgNumber, vr)
-    print(xm, ym)
-    
-    print("\tDownloading", end="")
-    for x in range(xm):
-        xstripe = []
-        for y in range(ym):
-            xstripe.append(getTile(pgNumber, vr, x, y))
-            print(".", end="")
-            sys.stdout.flush()
-        ystripes.append(np.vstack(xstripe))
-    print("\n\tDone.")
+    xm, ym = probe_dimensions(pgNumber, vr)
+    print((xm, ym))
+    from tqdm import tqdm
+
+    with tqdm(total=xm * ym) as pbar:
+        for x in range(xm):
+            xstripe = []
+            for y in range(ym):
+                xstripe.append(get_tile(pgNumber, vr, x, y))
+                sys.stdout.flush()
+            ystripes.append(np.vstack(xstripe))
+            pbar.update(1)
+
     return np.hstack(ystripes)
 
+
 if __name__ == "__main__":
-    import os
-    baseDir = os.path.join("/media", 
-                           "meawoppl",
-                           "3d9277ad-2580-4d78-aaa8-5ebfdfda51ca",
-                           "pages")
+    import argparse
 
-    baseDir = "pages"
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--path", default="download")
+    parser.add_argument("--start_page", type=int, default=1)
 
-    print(os.listdir(baseDir))
-    pn = 270
-    while True:
+    args = parser.parse_args()
+
+    if os.path.isabs(args.path):
+        base_dir = os.path.isabs(args.path)
+    else:
+        base_dir = os.path.abspath(args.path)
+
+    if not os.path.exists(base_dir):
+        print("Creating directory: " + base_dir)
+        os.mkdir(base_dir)
+
+    print(os.listdir(base_dir))
+    for pn in itertools.count(args.start_page):
         suffixes = "vr"
-        if pn == 36:
-            suffixes = ["ar", "av", "br", "bv"]
         for vr in suffixes:
-            pagePath = os.path.join(baseDir, "%03i%s.png" % (pn, vr))
-            if os.path.exists(pagePath):
+            save_path = os.path.join(base_dir, "%03i%s.png" % (pn, vr))
+            if os.path.exists(save_path):
                 continue
-            result = retrievePage(pn, vr)
-            imsave(pagePath, result)
+            result = retrieve_page(pn, vr)
+            imsave(save_path, result)
         pn += 1
